@@ -13,7 +13,7 @@ class ValuationDashboard {
         this.showLoading();
         await this.loadPortfolioData();
         this.hideLoading();
-        this.startAutoRefresh();
+        this.startSSEConnection();
     }
 
     setupEventListeners() {
@@ -36,15 +36,58 @@ class ValuationDashboard {
 
     async loadPortfolioData() {
         try {
-            // For demo purposes, we'll use mock data
-            // In production, this would fetch from your valuation-service API
-            this.portfolioData = await this.getMockPortfolioData();
+            const response = await fetch(`${this.apiBaseUrl}/portfolio`);
+            if (response.ok) {
+                this.portfolioData = await response.json();
+            } else {
+                // Fallback to mock data
+                this.portfolioData = await this.getMockPortfolioData();
+            }
             this.updateDashboard();
         } catch (error) {
             console.error('Error loading portfolio data:', error);
             // Fallback to mock data for demo
             this.portfolioData = await this.getMockPortfolioData();
             this.updateDashboard();
+        }
+    }
+
+    startSSEConnection() {
+        // Close existing connection if any
+        if (this.eventSource) {
+            this.eventSource.close();
+        }
+
+        try {
+            this.eventSource = new EventSource(`${this.apiBaseUrl}/portfolio/stream`);
+            
+            this.eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    this.portfolioData = data;
+                    this.updateDashboard();
+                    console.log('📊 Portfolio data updated via SSE');
+                } catch (error) {
+                    console.error('Error parsing SSE data:', error);
+                }
+            };
+
+            this.eventSource.onerror = (error) => {
+                console.error('SSE connection error:', error);
+                // Fallback to polling if SSE fails
+                this.startAutoRefresh();
+            };
+
+            this.eventSource.onopen = () => {
+                console.log('🔗 SSE connection established');
+                // Stop polling since SSE is working
+                this.stopAutoRefresh();
+            };
+
+        } catch (error) {
+            console.error('Failed to establish SSE connection:', error);
+            // Fallback to polling
+            this.startAutoRefresh();
         }
     }
 
@@ -277,7 +320,7 @@ class ValuationDashboard {
     }
 
     startAutoRefresh() {
-        // Refresh every 30 seconds
+        // Fallback polling every 30 seconds if SSE fails
         this.refreshInterval = setInterval(() => {
             this.refreshData();
         }, 30000);
@@ -288,6 +331,15 @@ class ValuationDashboard {
             clearInterval(this.refreshInterval);
             this.refreshInterval = null;
         }
+    }
+
+    cleanup() {
+        // Clean up SSE connection
+        if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+        }
+        this.stopAutoRefresh();
     }
 
     exportReport() {
@@ -335,5 +387,12 @@ class ValuationDashboard {
 
 // Initialize dashboard when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    new ValuationDashboard();
+    window.dashboard = new ValuationDashboard();
+});
+
+// Clean up on page unload
+window.addEventListener('beforeunload', () => {
+    if (window.dashboard) {
+        window.dashboard.cleanup();
+    }
 });
