@@ -162,13 +162,13 @@ class ValuationDashboard {
     updateHeaderStats() {
         const data = this.portfolioData;
         
-        document.getElementById('totalValue').textContent = this.formatCurrency(data.totalValue);
+        document.getElementById('totalValue').textContent = this.formatCurrency(data.total_value || 0);
         
         const pnlElement = document.getElementById('totalPnL');
-        pnlElement.textContent = this.formatCurrency(data.totalPnL);
-        pnlElement.className = `stat-value ${data.totalPnL >= 0 ? 'positive' : 'negative'}`;
+        pnlElement.textContent = this.formatCurrency(data.total_pnl || 0);
+        pnlElement.className = `stat-value ${(data.total_pnl || 0) >= 0 ? 'positive' : 'negative'}`;
         
-        document.getElementById('totalVaR').textContent = this.formatCurrency(data.totalVaR);
+        document.getElementById('totalVaR').textContent = this.formatCurrency(data.total_var || 0);
     }
 
     updatePositionsTable() {
@@ -178,15 +178,15 @@ class ValuationDashboard {
         this.portfolioData.positions.forEach(position => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td><strong>${position.symbol}</strong></td>
-                <td>${position.instrumentType}</td>
-                <td>${this.formatNumber(position.quantity)}</td>
-                <td>${this.formatCurrency(position.marketValue)}</td>
-                <td class="${position.pnl >= 0 ? 'positive' : 'negative'}">
-                    ${this.formatCurrency(position.pnl)}
+                <td><strong>${position.symbol || 'Unknown'}</strong></td>
+                <td>${position.instrument_type || 'Unknown'}</td>
+                <td>${this.formatNumber(position.quantity || 0)}</td>
+                <td>${this.formatCurrency(position.market_value || 0)}</td>
+                <td class="${(position.pnl || 0) >= 0 ? 'positive' : 'negative'}">
+                    ${this.formatCurrency(position.pnl || 0)}
                 </td>
-                <td>${position.weight.toFixed(1)}%</td>
-                <td>${position.delta.toFixed(3)}</td>
+                <td>${(position.weight || 0).toFixed(1)}%</td>
+                <td>${(position.delta || 0).toFixed(3)}</td>
             `;
             tbody.appendChild(row);
         });
@@ -194,18 +194,18 @@ class ValuationDashboard {
 
     updateRiskMetrics() {
         const data = this.portfolioData;
-        document.getElementById('portfolioVol').textContent = `${data.portfolioVolatility.toFixed(1)}%`;
-        document.getElementById('sharpeRatio').textContent = data.sharpeRatio.toFixed(2);
-        document.getElementById('maxDrawdown').textContent = `${data.maxDrawdown.toFixed(1)}%`;
+        document.getElementById('portfolioVol').textContent = `${(data.portfolio_volatility || 0).toFixed(1)}%`;
+        document.getElementById('sharpeRatio').textContent = (data.sharpe_ratio || 0).toFixed(2);
+        document.getElementById('maxDrawdown').textContent = `${(data.max_drawdown || 0).toFixed(1)}%`;
     }
 
     updateGreeks() {
-        const greeks = this.portfolioData.greeks;
-        document.getElementById('totalDelta').textContent = greeks.totalDelta.toFixed(2);
-        document.getElementById('totalGamma').textContent = greeks.totalGamma.toFixed(3);
-        document.getElementById('totalTheta').textContent = greeks.totalTheta.toFixed(2);
-        document.getElementById('totalVega').textContent = greeks.totalVega.toFixed(2);
-        document.getElementById('totalRho').textContent = greeks.totalRho.toFixed(2);
+        const greeks = this.portfolioData.greeks || {};
+        document.getElementById('totalDelta').textContent = (greeks.total_delta || 0).toFixed(2);
+        document.getElementById('totalGamma').textContent = (greeks.total_gamma || 0).toFixed(3);
+        document.getElementById('totalTheta').textContent = (greeks.total_theta || 0).toFixed(2);
+        document.getElementById('totalVega').textContent = (greeks.total_vega || 0).toFixed(2);
+        document.getElementById('totalRho').textContent = (greeks.total_rho || 0).toFixed(2);
     }
 
     createCharts() {
@@ -222,7 +222,7 @@ class ValuationDashboard {
 
         const positions = this.portfolioData.positions;
         const labels = positions.map(p => p.symbol);
-        const values = positions.map(p => p.marketValue);
+        const values = positions.map(p => p.market_value || 0);
         const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF'];
 
         this.charts.allocation = new Chart(ctx, {
@@ -269,7 +269,7 @@ class ValuationDashboard {
             this.charts.exposure.destroy();
         }
 
-        const exposures = this.portfolioData.exposures.byInstrumentType;
+        const exposures = this.portfolioData.exposures?.by_instrument_type || {};
         const labels = Object.keys(exposures);
         const values = Object.values(exposures);
 
