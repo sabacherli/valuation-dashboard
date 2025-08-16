@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Valuation Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+</head>
+<body>
+    <div class="dashboard">
+        <header class="header">
+            <h1>📊 Portfolio Valuation Dashboard</h1>
+            <div class="header-stats">
+                <div class="stat-card">
+                    <span class="stat-label">Total Value</span>
+                    <span class="stat-value" id="totalValue">$0.00</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">P&L</span>
+                    <span class="stat-value" id="totalPnL">$0.00</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">VaR (1D)</span>
+                    <span class="stat-value" id="totalVaR">$0.00</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <div class="left-panel">
+                <div class="card">
+                    <h2>Portfolio Allocation</h2>
+                    <canvas id="allocationChart"></canvas>
+                </div>
+                
+                <div class="card">
+                    <h2>Risk Metrics</h2>
+                    <div class="risk-metrics">
+                        <div class="metric">
+                            <span class="metric-label">Portfolio Volatility</span>
+                            <span class="metric-value" id="portfolioVol">0.0%</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Sharpe Ratio</span>
+                            <span class="metric-value" id="sharpeRatio">0.00</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Max Drawdown</span>
+                            <span class="metric-value" id="maxDrawdown">0.0%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="right-panel">
+                <div class="card">
+                    <h2>Positions</h2>
+                    <div class="table-container">
+                        <table id="positionsTable">
+                            <thead>
+                                <tr>
+                                    <th>Instrument</th>
+                                    <th>Type</th>
+                                    <th>Quantity</th>
+                                    <th>Market Value</th>
+                                    <th>P&L</th>
+                                    <th>Weight</th>
+                                    <th>Delta</th>
+                                </tr>
+                            </thead>
+                            <tbody id="positionsBody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Exposure Analysis</h2>
+                    <canvas id="exposureChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="bottom-panel">
+            <div class="card">
+                <h2>Greeks Summary</h2>
+                <div class="greeks-grid">
+                    <div class="greek-item">
+                        <span class="greek-label">Delta</span>
+                        <span class="greek-value" id="totalDelta">0.00</span>
+                    </div>
+                    <div class="greek-item">
+                        <span class="greek-label">Gamma</span>
+                        <span class="greek-value" id="totalGamma">0.00</span>
+                    </div>
+                    <div class="greek-item">
+                        <span class="greek-label">Theta</span>
+                        <span class="greek-value" id="totalTheta">0.00</span>
+                    </div>
+                    <div class="greek-item">
+                        <span class="greek-label">Vega</span>
+                        <span class="greek-value" id="totalVega">0.00</span>
+                    </div>
+                    <div class="greek-item">
+                        <span class="greek-label">Rho</span>
+                        <span class="greek-value" id="totalRho">0.00</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="refreshBtn" class="btn-primary">🔄 Refresh Data</button>
+            <button id="exportBtn" class="btn-secondary">📊 Export Report</button>
+        </div>
+    </div>
+
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <p>Loading portfolio data...</p>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>

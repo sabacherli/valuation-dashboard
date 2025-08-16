@@ -1,0 +1,13 @@
+{
+  "name": "valuation-dashboard",
+  "version": "1.0.0",
+  "description": "Web dashboard for portfolio valuation and risk analysis",
+  "main": "dashboard.js",
+  "scripts": {
+    "start": "python3 -m http.server 3000",
+    "dev": "python3 -m http.server 3000"
+  },
+  "keywords": ["portfolio", "valuation", "dashboard", "finance"],
+  "author": "",
+  "license": "MIT"
+}
