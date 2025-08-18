@@ -18,9 +18,9 @@ function mapToPortfolioUpdate(raw: any): PortfolioUpdate {
         const quantity = Number(p?.quantity ?? 0);
         const price = Number(p?.price ?? p?.currentPrice ?? 0);
         const value = Number(p?.value ?? p?.marketValue ?? quantity * price);
-        const averagePrice = Number(p?.averagePrice ?? price);
+        const averagePrice = Number(p?.average_cost ?? p?.averageCost ?? p?.averagePrice ?? price);
         const pnl = Number(p?.pnl ?? 0);
-        const pnlPercent = Number(p?.pnlPercent ?? 0);
+        const pnlPercent = Number(p?.pnl_percent ?? p?.pnlPercent ?? 0);
         return {
           id: String(p?.id ?? symbol),
           symbol,
