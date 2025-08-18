@@ -11,7 +11,6 @@ import SettingsPage from './pages/SettingsPage';
 import NotFoundPage from './pages/NotFoundPage';
 import { ErrorBoundary } from 'react-error-boundary';
 import { ErrorFallback } from './components/ErrorFallback/ErrorFallback';
-import { TestStyles } from './components/TestStyles';
 
 // Create a client
 const queryClient = new QueryClient({
@@ -39,11 +38,6 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
           <PortfolioUpdateProvider>
-            {/* Test component to verify Tailwind styles */}
-            <div className="p-4">
-              <TestStyles />
-            </div>
-            
             <Routes>
               <Route path="/" element={<DashboardLayout />}>
                 <Route index element={<PortfolioPage />} />
