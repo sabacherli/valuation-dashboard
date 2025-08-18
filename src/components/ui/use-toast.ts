@@ -5,10 +5,9 @@ type Toast = {
   title: string
   description?: string
   variant?: "default" | "destructive"
-  action?: {
-    label: string
-    onClick: () => void
-  }
+  action?: React.ReactNode
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 const TOAST_LIMIT = 5

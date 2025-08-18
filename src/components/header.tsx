@@ -1,34 +1,16 @@
 import { Moon, Sun } from "lucide-react"
-import * as React from "react"
+import { useTheme } from "./theme-provider"
 
 interface HeaderProps {
   className?: string
 }
 
 export function Header({ className }: HeaderProps) {
-  const [darkMode, setDarkMode] = React.useState(false)
-  
-  React.useEffect(() => {
-    // Check for dark mode preference at the root level
-    const root = document.documentElement
-    const isDark = root.classList.contains('dark')
-    setDarkMode(isDark)
-  }, [])
+  const { theme, setTheme } = useTheme()
+  const darkMode = theme === 'dark'
 
   const toggleTheme = () => {
-    const root = document.documentElement
-    const isDark = !root.classList.contains('dark')
-    
-    // Toggle dark class on root element
-    if (isDark) {
-      root.classList.add('dark')
-      localStorage.setItem('theme', 'dark')
-    } else {
-      root.classList.remove('dark')
-      localStorage.setItem('theme', 'light')
-    }
-    
-    setDarkMode(isDark)
+    setTheme(darkMode ? 'light' : 'dark')
   }
   
   return (

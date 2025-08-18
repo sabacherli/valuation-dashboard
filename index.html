@@ -4,7 +4,19 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React + TS</title>
+    <title>Valuation Dashboard</title>
+    <script>
+      (function() {
+        try {
+          var storageKey = 'vite-ui-theme';
+          var stored = localStorage.getItem(storageKey);
+          var systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var enableDark = stored ? stored === 'dark' : systemPrefersDark;
+          var root = document.documentElement;
+          if (enableDark) root.classList.add('dark'); else root.classList.remove('dark');
+        } catch (e) { /* no-op */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
