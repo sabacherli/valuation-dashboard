@@ -1,5 +1,5 @@
 import { usePortfolio } from "@/contexts/PortfolioContext"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 
 export default function PortfolioPage() {
@@ -38,6 +38,25 @@ export default function PortfolioPage() {
   )
   const [transactions, setTransactions] = useState<Transaction[]>([])
 
+  // Load transactions from backend on mount
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch('/api/transactions')
+        if (!res.ok) throw new Error(`Failed to load transactions: ${res.status}`)
+        const data = await res.json()
+        if (!cancelled && Array.isArray(data)) setTransactions(data as Transaction[])
+      } catch (e: any) {
+        console.warn('Failed to fetch transactions', e)
+        toast({ title: 'Failed to load transactions', description: e?.message ?? String(e), variant: 'destructive' })
+      }
+    }
+    load()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleBuy = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!symbol || !quantity) {
@@ -52,18 +71,23 @@ export default function PortfolioPage() {
       })
       if (!res.ok) throw new Error(`Add position failed: ${res.status}`)
       toast({ title: "Bought position", description: `${symbol} x ${quantity}` })
-      // Log transaction (use provided average cost as price if available)
-      setTransactions(prev => [
-        {
-          id: crypto.randomUUID(),
-          type: 'BUY',
-          symbol,
-          quantity: Number(quantity),
-          price: averageCost === '' ? undefined : Number(averageCost),
-          timestamp: new Date().toISOString(),
-        },
-        ...prev,
-      ])
+      // Persist transaction to backend
+      try {
+        const txRes = await fetch('/api/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'BUY',
+            symbol,
+            quantity: Number(quantity),
+            price: averageCost === '' ? undefined : Number(averageCost),
+          }),
+        })
+        if (txRes.ok) {
+          const created = await txRes.json()
+          setTransactions(prev => [created as Transaction, ...prev])
+        }
+      } catch {}
       setSymbol("")
       setQuantity("")
       setAverageCost("")
@@ -85,18 +109,23 @@ export default function PortfolioPage() {
       const data = await res.json().catch(() => ({} as any))
       const status = data?.status ?? "sold"
       toast({ title: `Position ${status}`, description: idOrSymbol })
-      // Log transaction (full position sell assumed)
-      setTransactions(prev => [
-        {
-          id: crypto.randomUUID(),
-          type: 'SELL',
-          symbol: idOrSymbol,
-          quantity: qty ?? 0,
-          price,
-          timestamp: new Date().toISOString(),
-        },
-        ...prev,
-      ])
+      // Persist transaction (sell) to backend
+      try {
+        const txRes = await fetch('/api/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'SELL',
+            symbol: idOrSymbol,
+            quantity: qty ?? 0,
+            price,
+          }),
+        })
+        if (txRes.ok) {
+          const created = await txRes.json()
+          setTransactions(prev => [created as Transaction, ...prev])
+        }
+      } catch {}
       refresh?.()
     } catch (err: any) {
       toast({ title: "Failed to sell position", description: err.message ?? String(err), variant: "destructive" })

@@ -1,11 +1,21 @@
-# React + TypeScript + Vite
+# Valuation Dashboard (React + Vite)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Frontend for the portfolio valuation app. Connects to the Rust backend (`valuation-service`) and streams live updates via SSE.
 
-Currently, two official plugins are available:
+## ⚡ Quickstart
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Prerequisite: the backend `valuation-service` must be running and reachable at `http://localhost:3000`.
+See `valuation-service/README.md` for setup and start instructions.
+
+Start the frontend in this directory:
+
+```bash
+npm install
+npm run dev
+```
+
+Open the app at the URL printed by Vite (typically `http://localhost:5173`).
+
 
 ## Expanding the ESLint configuration
 
