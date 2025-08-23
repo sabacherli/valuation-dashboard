@@ -1,10 +1,11 @@
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Home, LineChart, Settings } from "lucide-react";
+import { Home, LineChart, Settings, Coins } from "lucide-react";
 
 export function Sidebar() {
   const navigation = [
     { name: 'Portfolio', href: '/', icon: Home },
+    { name: 'Instruments', href: '/instruments', icon: Coins },
     { name: 'Risk Analysis', href: '/risk', icon: LineChart },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];

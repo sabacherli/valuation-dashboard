@@ -1,15 +1,14 @@
 import { usePortfolio } from "@/contexts/PortfolioContext"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useToast } from "@/components/ui/use-toast"
 
 export default function PortfolioPage() {
-  const { portfolio, isLoading, error, refresh } = usePortfolio()
+  const { portfolio, isLoading, error } = usePortfolio()
   const { toast } = useToast()
 
   // Add Position form state
   const [symbol, setSymbol] = useState("")
   const [quantity, setQuantity] = useState<number | "">("")
-  const [averageCost, setAverageCost] = useState<number | "">("")
   const [sellSymbol, setSellSymbol] = useState("")
   const [sellQuantity, setSellQuantity] = useState<number | "">("")
   const [sellPrice, setSellPrice] = useState<number | "">("")
@@ -26,17 +25,93 @@ export default function PortfolioPage() {
     timestamp: string
   }
 
-  // Currently selected position for the Sell form
-  const selectedPos = portfolio?.positions?.find(p => p.symbol === sellSymbol)
-  const sellQtyNum = sellQuantity === '' ? (selectedPos?.quantity ?? 0) : Number(sellQuantity)
+  const clearTransactions = async () => {
+    try {
+      const res = await fetch('/api/transactions', { method: 'DELETE' })
+      if (!res.ok) throw new Error(`Clear failed: ${res.status}`)
+      setTransactions([])
+      // Reset sell form after clearing
+      setSellSymbol('')
+      setSellQuantity('')
+      setSellPrice('')
+      toast({ title: 'Transactions cleared', description: 'All trades have been removed.' })
+    } catch (err: any) {
+      toast({ title: 'Failed to clear transactions', description: err.message ?? String(err), variant: 'destructive' })
+    }
+  }
+
+  // Currently selected aggregated position for the Sell form
+  const sellQtyNum = sellQuantity === '' ? 0 : Number(sellQuantity)
   const sellPriceNum = sellPrice === '' ? NaN : Number(sellPrice)
   const isSellValid = Boolean(
     sellSymbol &&
-    selectedPos &&
-    Number.isFinite(sellQtyNum) && sellQtyNum > 0 && sellQtyNum <= (selectedPos?.quantity ?? 0) &&
+    Number.isFinite(sellQtyNum) && sellQtyNum > 0 &&
     Number.isFinite(sellPriceNum) && sellPriceNum > 0
   )
   const [transactions, setTransactions] = useState<Transaction[]>([])
+
+  // Instruments loaded from backend to restrict Buy symbols
+  const [instruments, setInstruments] = useState<{ symbol: string; price: number }[]>([])
+  useEffect(() => {
+    let cancelled = false
+    const loadInstruments = async () => {
+      try {
+        const res = await fetch('/api/instruments')
+        if (!res.ok) throw new Error(`Failed to load instruments: ${res.status}`)
+        const data = await res.json()
+        if (!cancelled && Array.isArray(data)) setInstruments(data as { symbol: string; price: number }[])
+      } catch (e: any) {
+        toast({ title: 'Failed to load instruments', description: e?.message ?? String(e), variant: 'destructive' })
+      }
+    }
+    loadInstruments()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Only aggregated view
+
+  // Group positions by symbol and compute aggregated rows + children
+  const grouped = useMemo(() => {
+    const list = portfolio?.positions ?? []
+    type Sums = { symbol: string; qty: number; totalCost: number; marketValue: number; currentValue: number }
+    const sums = new Map<string, Sums>()
+    const children = new Map<string, typeof list>()
+    for (const p of list) {
+      const s = sums.get(p.symbol) ?? { symbol: p.symbol, qty: 0, totalCost: 0, marketValue: 0, currentValue: 0 }
+      s.qty += p.quantity
+      s.totalCost += p.quantity * p.averagePrice
+      s.marketValue += p.marketValue
+      s.currentValue += p.quantity * p.currentPrice
+      sums.set(p.symbol, s)
+      const arr = children.get(p.symbol) ?? []
+      arr.push(p)
+      children.set(p.symbol, arr)
+    }
+    const groups = Array.from(sums.values()).map((s) => {
+      const averagePrice = s.qty > 0 ? s.totalCost / s.qty : 0
+      const currentPrice = s.qty > 0 ? s.currentValue / s.qty : 0
+      const pnl = s.marketValue - s.totalCost
+      const pnlPercent = s.totalCost !== 0 ? (pnl / s.totalCost) * 100 : 0
+      const aggregate = {
+        id: `agg-${s.symbol}`,
+        symbol: s.symbol,
+        quantity: s.qty,
+        averagePrice,
+        currentPrice,
+        marketValue: s.marketValue,
+        pnl,
+        pnlPercent,
+      }
+      return { symbol: s.symbol, aggregate, children: children.get(s.symbol) ?? [] }
+    })
+    // Optional: sort by symbol
+    groups.sort((a, b) => a.symbol.localeCompare(b.symbol))
+    return groups
+  }, [portfolio?.positions])
+
+  // Selected aggregated position helper
+  const selectedAgg = useMemo(() => grouped.find(g => g.symbol === sellSymbol)?.aggregate, [grouped, sellSymbol])
 
   // Load transactions from backend on mount
   useEffect(() => {
@@ -63,11 +138,16 @@ export default function PortfolioPage() {
       toast({ title: "Missing fields", description: "Symbol and quantity are required", variant: "destructive" })
       return
     }
+    const currentPrice = instruments.find(i => i.symbol === symbol)?.price
+    if (currentPrice == null) {
+      toast({ title: 'Price unavailable', description: 'Select a valid instrument with a known price', variant: 'destructive' })
+      return
+    }
     try {
       const res = await fetch("/api/portfolio/positions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol, quantity: Number(quantity), average_cost: averageCost === "" ? undefined : Number(averageCost) })
+        body: JSON.stringify({ symbol, quantity: Number(quantity), average_cost: currentPrice })
       })
       if (!res.ok) throw new Error(`Add position failed: ${res.status}`)
       toast({ title: "Bought position", description: `${symbol} x ${quantity}` })
@@ -80,7 +160,7 @@ export default function PortfolioPage() {
             type: 'BUY',
             symbol,
             quantity: Number(quantity),
-            price: averageCost === '' ? undefined : Number(averageCost),
+            price: currentPrice,
           }),
         })
         if (txRes.ok) {
@@ -90,9 +170,7 @@ export default function PortfolioPage() {
       } catch {}
       setSymbol("")
       setQuantity("")
-      setAverageCost("")
-      // SSE will push the updated portfolio; offer manual refresh as well
-      refresh?.()
+      // SSE will push the updated portfolio; manual refresh remains available via the button
     } catch (err: any) {
       toast({ title: "Failed to buy position", description: err.message ?? String(err), variant: "destructive" })
     }
@@ -100,35 +178,30 @@ export default function PortfolioPage() {
 
   
 
-  const handleSell = async (idOrSymbol: string, qty?: number, price?: number) => {
+  const handleSell = async (symbolToSell: string, qty: number, price: number, maxQtyForSymbol: number) => {
     try {
-      const res = await fetch(`/api/portfolio/positions/${encodeURIComponent(idOrSymbol)}`, {
-        method: "DELETE",
+      // Persist SELL transaction to backend; SSE will update the portfolio
+      const txRes = await fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'SELL',
+          symbol: symbolToSell,
+          quantity: qty,
+          price,
+        }),
       })
-      if (!res.ok) throw new Error(`Delete failed: ${res.status}`)
-      const data = await res.json().catch(() => ({} as any))
-      const status = data?.status ?? "sold"
-      toast({ title: `Position ${status}`, description: idOrSymbol })
-      // Persist transaction (sell) to backend
-      try {
-        const txRes = await fetch('/api/transactions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'SELL',
-            symbol: idOrSymbol,
-            quantity: qty ?? 0,
-            price,
-          }),
-        })
-        if (txRes.ok) {
-          const created = await txRes.json()
-          setTransactions(prev => [created as Transaction, ...prev])
-        }
-      } catch {}
-      refresh?.()
+      if (!txRes.ok) throw new Error(`Sell failed: ${txRes.status}`)
+      const created = await txRes.json()
+      setTransactions(prev => [created as Transaction, ...prev])
+
+      const full = qty === maxQtyForSymbol
+      toast({
+        title: full ? 'Sold entire position' : 'Sold shares',
+        description: full ? `${symbolToSell}` : `${qty.toLocaleString()} of ${symbolToSell}`,
+      })
     } catch (err: any) {
-      toast({ title: "Failed to sell position", description: err.message ?? String(err), variant: "destructive" })
+      toast({ title: 'Failed to sell position', description: err.message ?? String(err), variant: 'destructive' })
     }
   }
 
@@ -179,37 +252,12 @@ export default function PortfolioPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Left column: KPIs + Positions */}
         <div className="space-y-6">
-          {/* Portfolio Summary Card */}
-          <div className="overflow-hidden rounded-lg bg-white shadow dark:bg-gray-800">
-            <div className="p-6">
-              <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-white">Portfolio Value</h3>
-              <div className="mt-2 flex items-baseline">
-                <p className="text-2xl font-semibold text-gray-900 dark:text-white">
-                  ${portfolio?.totalValue?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
-                </p>
-                {portfolio?.dailyChange && (
-                  <span className={`ml-2 text-sm font-medium ${
-                    portfolio.dailyChange.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-                  }`}>
-                    {portfolio.dailyChange.amount >= 0 ? '+' : ''}
-                    {portfolio.dailyChange.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    {' '}({portfolio.dailyChange.percent >= 0 ? '+' : ''}{portfolio.dailyChange.percent.toFixed(2)}%)
-                  </span>
-                )}
-                <button
-                  className="ml-auto rounded bg-gray-200 px-3 py-1 text-sm dark:bg-gray-700"
-                  onClick={() => refresh?.()}
-                >
-                  Refresh
-                </button>
-              </div>
-            </div>
-          </div>
 
           {/* Positions Table */}
           <div className="overflow-hidden rounded-lg bg-white shadow dark:bg-gray-800">
-            <div className="px-4 py-5 sm:px-6">
+            <div className="px-4 py-5 sm:px-6 flex items-center gap-3">
               <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-white">Positions</h3>
+              <div className="ml-auto flex items-center gap-2" />
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -224,31 +272,30 @@ export default function PortfolioPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
-                  {portfolio?.positions?.map((position) => (
-                    <tr key={position.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                      <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">
-                        {position.symbol}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-gray-500 dark:text-gray-300">
-                        {position.quantity.toLocaleString()}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-gray-500 dark:text-gray-300">
-                        ${position.averagePrice.toFixed(2)}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-gray-500 dark:text-gray-300">
-                        ${position.currentPrice.toFixed(2)}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-gray-500 dark:text-gray-300">
-                        ${position.marketValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className={`whitespace-nowrap px-6 py-4 text-right text-sm font-medium ${
-                        position.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-                      }`}>
-                        ${position.pnl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        {' '}({position.pnlPercent >= 0 ? '+' : ''}{position.pnlPercent.toFixed(2)}%)
-                      </td>
-                      
-                    </tr>
+                  {grouped.map(group => (
+                      <tr key={`agg-${group.symbol}`} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <td className="whitespace-nowrap px-6 py-4 text-sm font-semibold text-gray-900 dark:text-white">
+                          {group.symbol}
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-gray-900 dark:text-gray-100 font-semibold">
+                          {group.aggregate.quantity.toLocaleString()}
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-gray-900 dark:text-gray-100 font-semibold">
+                          ${group.aggregate.averagePrice.toFixed(2)}
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-gray-900 dark:text-gray-100 font-semibold">
+                          ${group.aggregate.currentPrice.toFixed(2)}
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-gray-900 dark:text-gray-100 font-semibold">
+                          ${group.aggregate.marketValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className={`whitespace-nowrap px-6 py-4 text-right text-sm font-semibold ${
+                          group.aggregate.pnl >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          ${group.aggregate.pnl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {' '}({group.aggregate.pnlPercent >= 0 ? '+' : ''}{group.aggregate.pnlPercent.toFixed(2)}%)
+                        </td>
+                      </tr>
                   ))}
                 </tbody>
               </table>
@@ -267,12 +314,22 @@ export default function PortfolioPage() {
               <form onSubmit={handleBuy} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Symbol</label>
-                  <input
+                  <select
                     value={symbol}
-                    onChange={e => setSymbol(e.target.value.toUpperCase())}
-                    placeholder="AAPL"
+                    onChange={e => setSymbol(e.target.value)}
                     className="mt-1 w-full rounded-md border border-gray-300 p-2 dark:border-gray-600 dark:bg-gray-900"
-                  />
+                  >
+                    <option value="">Select symbol</option>
+                    {instruments.map(ins => (
+                      <option key={ins.symbol} value={ins.symbol}>{ins.symbol}</option>
+                    ))}
+                  </select>
+                  {symbol && (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Current price: $
+                      {instruments.find(i => i.symbol === symbol)?.price?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '-'}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Quantity</label>
@@ -286,17 +343,19 @@ export default function PortfolioPage() {
                   />
                 </div>
                 <div className="sm:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Average Cost (optional)</label>
-                  <input
-                    value={averageCost}
-                    onChange={e => setAverageCost(e.target.value === '' ? '' : Number(e.target.value))}
-                    type="number"
-                    step="any"
-                    className="mt-1 w-full rounded-md border border-gray-300 p-2 dark:border-gray-600 dark:bg-gray-900"
-                  />
+                  <div className="text-sm text-gray-600 dark:text-gray-300">
+                    Using current price as average cost: $
+                    {symbol ? (instruments.find(i => i.symbol === symbol)?.price?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '-') : '-' }
+                  </div>
                 </div>
                 <div className="sm:col-span-2 flex items-end">
-                  <button type="submit" className="w-full rounded bg-green-600 px-4 py-2 text-white hover:bg-green-700">Buy</button>
+                  <button
+                    type="submit"
+                    disabled={!symbol || instruments.length === 0}
+                    className={`w-full rounded px-4 py-2 text-white ${(!symbol || instruments.length === 0) ? 'bg-green-600/50 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
+                  >
+                    Buy
+                  </button>
                 </div>
               </form>
             </div>
@@ -315,14 +374,14 @@ export default function PortfolioPage() {
                     toast({ title: 'Select a symbol', description: 'Choose a position to sell', variant: 'destructive' });
                     return;
                   }
-                  const pos = portfolio?.positions?.find(p => p.symbol === sellSymbol);
-                  const qtyNum = sellQuantity === '' ? (pos?.quantity ?? 0) : Number(sellQuantity);
-                  if (!pos || !qtyNum || Number.isNaN(qtyNum) || qtyNum <= 0) {
+                  const qtyNum = sellQuantity === '' ? 0 : Number(sellQuantity);
+                  const maxQty = selectedAgg?.quantity ?? 0;
+                  if (!qtyNum || Number.isNaN(qtyNum) || qtyNum <= 0) {
                     toast({ title: 'Invalid quantity', description: 'Enter a valid quantity to sell', variant: 'destructive' });
                     return;
                   }
-                  if (qtyNum > pos.quantity) {
-                    toast({ title: 'Quantity exceeds holding', description: `Max available: ${pos.quantity.toLocaleString()}`, variant: 'destructive' });
+                  if (qtyNum > maxQty) {
+                    toast({ title: 'Quantity exceeds holding', description: `Max available: ${maxQty.toLocaleString()}`, variant: 'destructive' });
                     return;
                   }
                   if (sellPrice === '' || Number.isNaN(Number(sellPrice)) || Number(sellPrice) <= 0) {
@@ -330,7 +389,7 @@ export default function PortfolioPage() {
                     return;
                   }
                   const priceNum = Number(sellPrice);
-                  handleSell(sellSymbol, qtyNum, priceNum);
+                  handleSell(sellSymbol, qtyNum, priceNum, maxQty);
                   setSellSymbol('');
                   setSellQuantity('');
                   setSellPrice('');
@@ -344,10 +403,10 @@ export default function PortfolioPage() {
                     onChange={e => {
                       const val = e.target.value;
                       setSellSymbol(val);
-                      const p = portfolio?.positions?.find(x => x.symbol === val);
-                      if (p) {
-                        setSellQuantity(p.quantity);
-                        setSellPrice(p.currentPrice);
+                      const agg = grouped.find(g => g.symbol === val)?.aggregate;
+                      if (agg) {
+                        setSellQuantity(agg.quantity);
+                        setSellPrice(agg.currentPrice);
                       } else {
                         setSellQuantity('');
                         setSellPrice('');
@@ -356,14 +415,14 @@ export default function PortfolioPage() {
                     className="mt-1 w-full rounded-md border border-gray-300 p-2 dark:border-gray-600 dark:bg-gray-900"
                   >
                     <option value="">Select symbol</option>
-                    {portfolio?.positions?.map(p => (
-                      <option key={p.id} value={p.symbol}>{p.symbol} — {p.quantity.toLocaleString()}</option>
+                    {grouped.map(g => (
+                      <option key={g.symbol} value={g.symbol}>{g.symbol}</option>
                     ))}
                   </select>
-                  {selectedPos && (
+                  {selectedAgg && (
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Holding: {selectedPos.quantity.toLocaleString()} @ $
-                      {selectedPos.currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      Holding: {selectedAgg.quantity.toLocaleString()} @ $
+                      {selectedAgg.currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
                   )}
                 </div>
@@ -376,7 +435,7 @@ export default function PortfolioPage() {
                       if (val === '') { setSellQuantity(''); return; }
                       const num = Number(val);
                       if (Number.isNaN(num) || num < 0) { return; }
-                      const max = selectedPos?.quantity ?? Infinity;
+                      const max = selectedAgg?.quantity ?? Infinity;
                       if (num > max) {
                         setSellQuantity(max === Infinity ? num : max);
                         if (max !== Infinity) {
@@ -389,13 +448,13 @@ export default function PortfolioPage() {
                     type="number"
                     step="1"
                     min="0"
-                    max={selectedPos?.quantity}
+                    max={selectedAgg?.quantity}
                     className="mt-1 w-full rounded-md border border-gray-300 p-2 dark:border-gray-600 dark:bg-gray-900"
                     placeholder="Leave blank for full"
                   />
-                  {selectedPos && (
+                  {selectedAgg && (
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Max: {selectedPos.quantity.toLocaleString()}
+                      Max: {selectedAgg.quantity.toLocaleString()}
                     </p>
                   )}
                 </div>
@@ -410,10 +469,10 @@ export default function PortfolioPage() {
                     className="mt-1 w-full rounded-md border border-gray-300 p-2 dark:border-gray-600 dark:bg-gray-900"
                     required
                   />
-                  {selectedPos && (
+                  {selectedAgg && (
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                       Required. Current: $
-                      {selectedPos.currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {selectedAgg.currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
                   )}
                 </div>
@@ -432,8 +491,14 @@ export default function PortfolioPage() {
 
           {/* Transactions Log */}
           <div className="overflow-hidden rounded-lg bg-white shadow dark:bg-gray-800">
-            <div className="px-4 py-5 sm:px-6">
+            <div className="px-4 py-5 sm:px-6 flex items-center">
               <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-white">Transactions</h3>
+              <button
+                onClick={clearTransactions}
+                className="ml-auto rounded bg-gray-200 px-3 py-1 text-sm dark:bg-gray-700"
+              >
+                Clear log
+              </button>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">

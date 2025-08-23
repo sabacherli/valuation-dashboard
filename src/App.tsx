@@ -6,6 +6,7 @@ import DashboardLayout from './layouts/DashboardLayout';
 import PortfolioPage from './pages/PortfolioPage';
 import RiskAnalysisPage from './pages/RiskAnalysisPage';
 import SettingsPage from './pages/SettingsPage';
+import InstrumentsPage from './pages/InstrumentsPage';
 import NotFoundPage from './pages/NotFoundPage';
 import { ErrorBoundary } from 'react-error-boundary';
 import { ErrorFallback } from './components/ErrorFallback/ErrorFallback';
@@ -29,6 +30,7 @@ function App() {
           <Routes>
             <Route path="/" element={<DashboardLayout />}>
               <Route index element={<PortfolioPage />} />
+              <Route path="instruments" element={<InstrumentsPage />} />
               <Route path="risk" element={<RiskAnalysisPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="*" element={<NotFoundPage />} />
