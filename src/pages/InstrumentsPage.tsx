@@ -11,11 +11,11 @@ export default function InstrumentsPage() {
   const { toast } = useToast();
   const [instruments, setInstruments] = useState<Instrument[]>([]);
   const [symbol, setSymbol] = useState("");
-  const [price, setPrice] = useState<number | "">("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Array<{ symbol: string; description?: string }>>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [editingSymbol, setEditingSymbol] = useState<string | null>(null);
-  const [editPrice, setEditPrice] = useState<number | "">("");
-  const [rowSaving, setRowSaving] = useState<string | null>(null);
+  // no row editing anymore
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [days, setDays] = useState(1);
   const [history, setHistory] = useState<Array<{ timestamp: string; price: number }>>([]);
@@ -36,6 +36,39 @@ export default function InstrumentsPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Typeahead search for symbols via backend /api/symbols/search
+  useEffect(() => {
+    // If a symbol is already selected, do not fetch or show suggestions
+    if (symbol) {
+      setSearchResults([]);
+      return;
+    }
+    if (!searchQuery || searchQuery.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    const controller = new AbortController();
+    const t = setTimeout(async () => {
+      try {
+        setSearchLoading(true);
+        const res = await fetch(`/api/symbols/search?q=${encodeURIComponent(searchQuery.trim())}&exchange=US`, { signal: controller.signal });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({} as any));
+          throw new Error(body?.error ? `${res.status}: ${body.error}` : `Failed to search symbols: ${res.status}`);
+        }
+        const data = (await res.json()) as Array<{ symbol: string; description?: string }>;
+        setSearchResults(data);
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') {
+          toast({ title: "Failed to search symbols", description: e?.message ?? String(e), variant: "destructive" });
+        }
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 300);
+    return () => { clearTimeout(t); controller.abort(); };
+  }, [searchQuery, symbol, toast]);
 
   useEffect(() => {
     // default to first instrument when list loads
@@ -130,7 +163,6 @@ export default function InstrumentsPage() {
     // Scales
     // Fix the x-domain to the selected timespan so the entire range is always visible
     const nowUtc = nowUtcPrep;
-    const spanMs = spanMsPrep;
     const start = startPrep;
     const end = nowUtc;
     const x = d3
@@ -276,29 +308,31 @@ export default function InstrumentsPage() {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!symbol || price === "" || Number(price) <= 0) {
-      toast({ title: "Invalid input", description: "Symbol and positive price are required", variant: "destructive" });
+    const sym = symbol.trim().toUpperCase();
+    if (!sym) {
+      toast({ title: "Invalid input", description: "Symbol is required", variant: "destructive" });
       return;
     }
     try {
       setLoading(true);
-      const res = await fetch("/api/instruments", {
+      const res = await fetch("/api/instruments/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: symbol.toUpperCase(), price: Number(price) }),
+        body: JSON.stringify({ symbol: sym }),
       });
-      if (!res.ok) throw new Error(`Save failed: ${res.status}`);
-      toast({ title: "Instrument saved", description: `${symbol.toUpperCase()} @ $${Number(price).toFixed(2)}` });
-      setSymbol("");
-      setPrice("");
-      await load();
-      // Refresh chart if we updated the selected symbol
-      const justSaved = symbol.toUpperCase();
-      if (selectedSymbol && justSaved === selectedSymbol) {
-        await fetchHistory(selectedSymbol, days);
+      if (!res.ok) {
+        const msg = await res.json().catch(() => ({} as any));
+        throw new Error(msg?.error ? `${res.status}: ${msg.error}` : `Subscribe failed: ${res.status}`);
       }
+      toast({ title: "Subscribed", description: `${sym} added. Live prices will update as trades arrive.` });
+      // Switch selection to the newly subscribed symbol and refresh history
+      setSelectedSymbol(sym);
+      await load();
+      await fetchHistory(sym, days);
+      setSymbol("");
+      setSearchQuery("");
     } catch (e: any) {
-      toast({ title: "Failed to save instrument", description: e?.message ?? String(e), variant: "destructive" });
+      toast({ title: "Failed to subscribe instrument", description: e?.message ?? String(e), variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -324,43 +358,7 @@ export default function InstrumentsPage() {
     }
   };
 
-  const startEdit = (ins: Instrument) => {
-    setEditingSymbol(ins.symbol);
-    setEditPrice(ins.price);
-  };
-
-  const cancelEdit = () => {
-    setEditingSymbol(null);
-    setEditPrice("");
-  };
-
-  const saveEdit = async () => {
-    if (!editingSymbol || editPrice === "" || Number(editPrice) <= 0) {
-      toast({ title: "Invalid input", description: "Enter a positive price", variant: "destructive" });
-      return;
-    }
-    try {
-      setRowSaving(editingSymbol);
-      const res = await fetch("/api/instruments", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol: editingSymbol, price: Number(editPrice) }),
-      });
-      if (!res.ok) throw new Error(`Update failed: ${res.status}`);
-      toast({ title: "Price updated", description: `${editingSymbol} @ $${Number(editPrice).toFixed(2)}` });
-      setEditingSymbol(null);
-      setEditPrice("");
-      await load();
-      // Refresh chart if we edited the selected symbol
-      if (selectedSymbol && editingSymbol === selectedSymbol) {
-        await fetchHistory(selectedSymbol, days);
-      }
-    } catch (e: any) {
-      toast({ title: "Failed to update price", description: e?.message ?? String(e), variant: "destructive" });
-    } finally {
-      setRowSaving(null);
-    }
-  };
+  // Removed manual price edit functionality
 
   const sorted = useMemo(() => [...instruments].sort((a, b) => a.symbol.localeCompare(b.symbol)), [instruments]);
 
@@ -370,61 +368,81 @@ export default function InstrumentsPage() {
         <h2 className="text-2xl font-bold leading-7 text-gray-900 dark:text-white sm:truncate sm:text-3xl sm:tracking-tight">
           Instruments
         </h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Define tradable symbols and their prices.</p>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Subscribe symbols via Finnhub and view their prices and history.</p>
       </div>
 
-      {/* Two-column split */}
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        {/* Left: Add/Update + Universe */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Left column */}
         <div className="space-y-6">
-          <div className="overflow-hidden rounded-lg bg-white shadow dark:bg-gray-800">
+          {/* Subscribe card */}
+          <div className="overflow-visible rounded-lg bg-white shadow dark:bg-gray-800">
             <div className="px-4 py-5 sm:px-6">
-              <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-white">Add / Update Instrument</h3>
+              <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-white">Subscribe Instrument</h3>
             </div>
             <div className="px-4 pb-6 sm:px-6">
-              <form onSubmit={onSubmit} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Symbol</label>
-                  <input
-                    value={symbol}
-                    onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                    placeholder="AAPL"
-                    className="mt-1 w-full rounded-md border border-gray-300 p-2 dark:border-gray-600 dark:bg-gray-900"
-                  />
+              <form onSubmit={onSubmit}>
+                {/* Row: input + button aligned bottom */}
+                <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                  <div className="relative sm:flex-1">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Symbol</label>
+                    <input
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setSymbol("");
+                      }}
+                      placeholder="Type 2+ letters (e.g., AAP, appl)"
+                      className="mt-1 w-full rounded-md border border-gray-300 p-2 dark:border-gray-600 dark:bg-gray-900"
+                    />
+                    {/* Custom suggestions dropdown */}
+                    {!symbol && searchResults.length > 0 && (
+                      <ul
+                        role="listbox"
+                        className="absolute z-10 mt-1 w-full max-h-64 overflow-auto rounded-md border border-gray-200 bg-white shadow dark:border-gray-700 dark:bg-gray-900"
+                      >
+                        {searchResults.map((s) => (
+                          <li
+                            key={s.symbol}
+                            role="option"
+                            aria-selected={false}
+                            onMouseDown={(e) => {
+                              // onMouseDown to avoid input blur before click
+                              e.preventDefault();
+                              setSearchQuery(s.symbol);
+                              setSymbol(s.symbol);
+                              setSearchResults([]);
+                            }}
+                            className="px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700"
+                            title={s.description || s.symbol}
+                          >
+                            <span className="font-medium">{s.symbol}</span>
+                            {s.description && <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{s.description}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="sm:w-40">
+                    <button
+                      type="submit"
+                      disabled={loading || !symbol}
+                      className={`w-full rounded px-4 py-2 text-white ${loading || !symbol ? "bg-blue-600/50 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 cursor-pointer"}`}
+                    >
+                      Subscribe
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Price</label>
-                  <input
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value === "" ? "" : Number(e.target.value))}
-                    type="number"
-                    step="any"
-                    min="0"
-                    className="mt-1 w-full rounded-md border border-gray-300 p-2 dark:border-gray-600 dark:bg-gray-900"
-                  />
-                </div>
-                <div className="sm:col-span-1 flex items-end">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className={`w-full rounded px-4 py-2 text-white ${loading ? "bg-blue-600/50 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}
-                  >
-                    Save
-                  </button>
-                </div>
+                {/* Helper/selection text below, not affecting button alignment */}
+                <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{searchLoading ? "Searching..." : searchResults.length > 0 ? "Click a suggestion to select a symbol" : ""}</div>
+                {symbol && <div className="mt-2 text-xs text-gray-500">Selected: {symbol}</div>}
               </form>
             </div>
           </div>
 
+          {/* Universe card */}
           <div className="overflow-hidden rounded-lg bg-white shadow dark:bg-gray-800">
             <div className="px-4 py-5 sm:px-6 flex items-center">
               <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-white">Universe</h3>
-              <button
-                onClick={load}
-                className="ml-auto rounded bg-gray-200 px-3 py-1 text-sm dark:bg-gray-700"
-              >
-                Refresh
-              </button>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -449,53 +467,15 @@ export default function InstrumentsPage() {
                       >
                         <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900 dark:text-white">{ins.symbol}</td>
                         <td className="whitespace-nowrap px-6 py-4 text-right text-sm text-gray-900 dark:text-gray-100">
-                          {editingSymbol === ins.symbol ? (
-                            <input
-                              value={editPrice}
-                              onChange={(e) => setEditPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                              type="number"
-                              step="any"
-                              min="0"
-                              className="w-32 rounded-md border border-gray-300 p-1 text-right dark:border-gray-600 dark:bg-gray-900"
-                              autoFocus
-                            />
-                          ) : (
-                            `$${ins.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          )}
+                          {`$${ins.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                         </td>
                         <td className="whitespace-nowrap px-6 py-4 text-right text-sm space-x-2">
-                          {editingSymbol === ins.symbol ? (
-                            <>
-                              <button
-                                onClick={saveEdit}
-                                disabled={rowSaving === ins.symbol}
-                                className={`rounded px-3 py-1 text-white ${rowSaving === ins.symbol ? 'bg-green-600/50 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
-                              >
-                                Save
-                              </button>
-                              <button
-                                onClick={cancelEdit}
-                                className="rounded bg-gray-200 px-3 py-1 dark:bg-gray-700"
-                              >
-                                Cancel
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); startEdit(ins); }}
-                                className="rounded bg-blue-600 px-3 py-1 text-white hover:bg-blue-700"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); onDelete(ins.symbol); }}
-                                className="rounded bg-red-600 px-3 py-1 text-white hover:bg-red-700"
-                              >
-                                Delete
-                              </button>
-                            </>
-                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); onDelete(ins.symbol); }}
+                            className="rounded bg-red-600 px-3 py-1 text-white hover:bg-red-700 cursor-pointer"
+                          >
+                            Delete
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -506,7 +486,7 @@ export default function InstrumentsPage() {
           </div>
         </div>
 
-        {/* Right: Price history chart */}
+        {/* Right column: Price history */}
         <div className="overflow-hidden rounded-lg bg-white shadow dark:bg-gray-800">
           <div className="px-4 py-5 sm:px-6 flex items-center gap-4">
             <h3 className="text-lg font-medium leading-6 text-gray-900 dark:text-white">Price History</h3>
@@ -515,7 +495,7 @@ export default function InstrumentsPage() {
               <select
                 value={days}
                 onChange={(e) => setDays(Number(e.target.value))}
-                className="rounded border border-gray-300 bg-white p-1 text-sm dark:border-gray-600 dark:bg-gray-900"
+                className="rounded border border-gray-300 bg-white p-1 text-sm dark:border-gray-600 dark:bg-gray-900 cursor-pointer"
                 title="Range"
               >
                 <option value={1}>1D</option>
